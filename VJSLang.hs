@@ -1,5 +1,6 @@
 import VData
 import VParser
+import VStringReader
 
 type Block
   = VList Stmt
@@ -7,10 +8,21 @@ type Block
 type Identifier 
   = String
 
+type Reference
+  = VList Identifier
+
+type Arguments 
+  = VList Identifier
+
 data Stmt
-  = LiteralStmt Lit
-  | FunctionDef Identifier (VList Identifier) Block
-  | FunctionCall Identifier (VList Expr)
+  = ExprStmt Expr
+
+  | VarDefStmt Identifier
+  | VarInitStmt Identifier Expr
+  | VarAssignStmt Reference Expr
+
+  | FunctionDef Identifier Arguments Block
+  
   | ReturnStmt Expr
   | StmtC Dim Stmt Stmt
   deriving (Show, Eq)
@@ -26,6 +38,8 @@ instance Variational Stmt where
 data Lit
   = NumLit String
   | StringLit String
+  | ObjectLit (VList (String, Expr))
+  | InlineFunction Arguments Block
   | LitC Dim Lit Lit
   deriving (Show, Eq)
 
@@ -39,8 +53,9 @@ instance Variational Lit where
 
 data Expr
   = LitExpr Lit
-  | VarExpr Identifier
+  | VarExpr Reference
   | BinOpExpr BinOp Expr Expr
+  | FunctionCall Reference (VList Expr)
   | ExprC Dim Expr Expr
   deriving (Show, Eq)
 
@@ -82,22 +97,80 @@ stringLiteral = do
   char delimiter
   return $ StringLit contents
 
+objectLiteral :: VParser Lit
+objectLiteral = do
+  char '{'
+  kvps <- wpad $ objectKeyValuePair `sepByV` (wpad $ char ',')
+  char '}'
+  return $ ObjectLit kvps
+
+objectKeyValuePair :: VParser (String, Expr)
+objectKeyValuePair = do
+  name <- identifier -|- (fmap (\(StringLit x) -> x) stringLiteral)
+  wpad $ char ':'
+  val <- expr
+  return (name, val)
+
+inlineFunction :: VParser Lit
+inlineFunction = do
+  string "function"
+  whitespace0
+  char '('
+  args <- wpad $ identifier `sepByV` (wpad $ char ',')
+  char ')'
+  whitespace0
+  char '{'
+  body <- wpad block
+  char '}'
+  return $ InlineFunction args body
+
 literal :: VParser Lit
-literal = stringLiteral -||- numberLiteral
+literal =     inlineFunction 
+        -||-  objectLiteral 
+        -||-  stringLiteral 
+        -||-  numberLiteral
+
+varDef :: VParser Stmt
+varDef = do
+  string "var"
+  whitespace
+  name <- identifier
+  return $ VarDefStmt name
+
+varInit :: VParser Stmt
+varInit = do
+  string "var"
+  whitespace
+  name <- identifier
+  wpad $ char '='
+  val <- expr
+  return $ VarInitStmt name val
+
+varAssign :: VParser Stmt
+varAssign = do
+  name <- reference
+  wpad $ char '='
+  val <- expr
+  return $ VarAssignStmt name val
 
 stmt :: VParser Stmt
 stmt  =     returnStmt
+      -||-  varInit
+      -||-  varDef
+      -||-  varAssign
       -||-  functionDef 
-      -||-  functionCall
-      -||-  (fmap LiteralStmt literal)
+      -||-  (fmap ExprStmt expr)
 
 identifier :: VParser String
 identifier = do
-  let alpha = ['A'..'Z'] ++ ['a'..'z'] ++ "_"
+  let alpha = ['A'..'Z'] ++ ['a'..'z'] ++ "$_"
   let numeric = ['0'..'9']
   x <- oneOf alpha
   xs <- manyL $ oneOf $ alpha ++ numeric
   return $ x : xs
+
+reference :: VParser Reference
+reference = identifier `sepBy1V` (char '.')
 
 block :: VParser Block
 block = mergeContext $ manyV $ do
@@ -121,9 +194,9 @@ functionDef = do
   char '}'
   return $ FunctionDef name argNames content
 
-functionCall :: VParser Stmt
+functionCall :: VParser Expr
 functionCall = do
-  name <- identifier
+  name <- reference
   whitespace0
   char '('
   args <- expr `sepByV` (whitespace0 >> char ',' >> whitespace0)
@@ -142,8 +215,10 @@ op = oneOf "+-*/" >>= \o -> return $ case o of
 
 expr :: VParser Expr
 expr = mergeContext $ do
-  l <-    (fmap LitExpr literal)
-    -||-  (fmap VarExpr identifier)
+  l <-
+          (fmap LitExpr literal)
+    -||-  functionCall   
+    -||-  (fmap VarExpr reference)
     -||-  parenExpr
   binOp' l
   where

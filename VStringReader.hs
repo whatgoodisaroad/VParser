@@ -1,4 +1,4 @@
-module VStringReader (readVString) where
+module VStringReader (readVString, vstringFromFile) where
 
   import VData
   import Text.ParserCombinators.Parsec
@@ -20,5 +20,13 @@ module VStringReader (readVString) where
   vlist :: Parser VString
   vlist = (many $ (try segchoice) <|> plain) >>= return . VL
 
+  vlistFile :: Parser VString
+  vlistFile = do { v <- vlist; eof; return v; }
+
   readVString :: String -> VString
-  readVString s = case parse vlist "" s of { Right v -> v }
+  readVString s = case parse vlistFile "" s of
+    Right v -> v
+    Left m -> error $ show m
+
+  vstringFromFile :: FilePath -> IO VString
+  vstringFromFile = fmap readVString . readFile
