@@ -72,6 +72,7 @@ data BinOp
   | Sub
   | Mul
   | Div
+  | Dot
   deriving (Show, Eq)
 
 whitespace :: VParser ()
@@ -207,11 +208,12 @@ returnStmt :: VParser Stmt
 returnStmt = fmap ReturnStmt $ string "return" >> whitespace >> expr
 
 op :: VParser BinOp
-op = oneOf "+-*/" >>= \o -> return $ case o of
+op = oneOf ".+-*/" >>= \o -> return $ case o of
   '+' -> Add
   '-' -> Sub
   '*' -> Mul
   '/' -> Div
+  '.' -> Dot
 
 expr :: VParser Expr
 expr = mergeContext $ do

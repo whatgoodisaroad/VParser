@@ -4,17 +4,17 @@ module VStringReader (readVString, vstringFromFile) where
   import Text.ParserCombinators.Parsec
 
   plain :: Parser (Segment Char)
-  plain = (many1 $ noneOf "#") >>= return . Elems
+  plain = (many1 $ noneOf "@") >>= return . Elems
 
   segchoice :: Parser (Segment Char)
   segchoice = do
-    char '#'
+    char '@'
     dim <- oneOf $ ['A' .. 'Z']
     char '<'
     lalt <- vlist
-    string "#,"
+    string "@,"
     ralt <- vlist
-    string "#>"
+    string "@>"
     return $ SegChoice dim lalt ralt
 
   vlist :: Parser VString
