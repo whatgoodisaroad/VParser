@@ -3,7 +3,7 @@ import VParser
 import VStringReader
 
 type Block
-  = VList Stmt
+  = VList (Either Stmt CtrlStruct)
 
 type Identifier 
   = String
@@ -16,13 +16,9 @@ type Arguments
 
 data Stmt
   = ExprStmt Expr
-
   | VarDefStmt Identifier
   | VarInitStmt Identifier Expr
   | VarAssignStmt Reference Expr
-
-  | FunctionDef Identifier Arguments Block
-  
   | ReturnStmt Expr
   | StmtC Dim Stmt Stmt
   deriving (Show, Eq)
@@ -73,6 +69,17 @@ data BinOp
   | Mul
   | Div
   | Dot
+  | WeakEq
+  | StrongEq
+  deriving (Show, Eq)
+
+data CtrlStruct
+  = IfStruct Expr Block
+  | IfElseStruct Expr Block Block
+  | WhileStruct Expr Block
+  | DoWhileStruct Expr Block
+  | ForStruct Stmt Expr Stmt Block
+  | FunctionDef Identifier Arguments Block
   deriving (Show, Eq)
 
 whitespace :: VParser ()
@@ -86,7 +93,6 @@ wpadl, wpadr, wpad :: VParser a -> VParser a
 wpadl p = whitespace0 >> p
 wpadr p = do { a <- p; whitespace0; return a }
 wpad = wpadr . wpadl
-
 
 numberLiteral :: VParser Lit
 numberLiteral = fmap NumLit $ manyL1 $ oneOf ['0'..'9']
@@ -155,12 +161,14 @@ varAssign = do
   return $ VarAssignStmt name val
 
 stmt :: VParser Stmt
-stmt  =     returnStmt
-      -||-  varInit
-      -||-  varDef
-      -||-  varAssign
-      -||-  functionDef 
-      -||-  (fmap ExprStmt expr)
+stmt  = do
+  s <-    returnStmt
+    -||-  varInit
+    -||-  varDef
+    -||-  varAssign
+    -||-  (fmap ExprStmt expr)
+  char ';'
+  return s
 
 identifier :: VParser String
 identifier = do
@@ -175,32 +183,16 @@ reference = identifier `sepBy1V` (char '.')
 
 block :: VParser Block
 block = mergeContext $ manyV $ do
-  s <- stmt
-  char ';'
+  s <- (stmt >>= return . Left) -|- (ctrlStruct >>= return . Right)
   whitespace0
   return s
-
-functionDef :: VParser Stmt
-functionDef = do
-  string "function"
-  whitespace
-  name <- identifier
-  char '('
-  argNames <- sepByV identifier (whitespace0 >> string "," >> whitespace0)
-  char ')'
-  whitespace0
-  char '{'
-  whitespace0
-  content <- block
-  char '}'
-  return $ FunctionDef name argNames content
 
 functionCall :: VParser Expr
 functionCall = do
   name <- reference
   whitespace0
   char '('
-  args <- expr `sepByV` (whitespace0 >> char ',' >> whitespace0)
+  args <- wpad $ expr `sepByV` (whitespace0 >> char ',' >> whitespace0)
   char ')'
   return $ FunctionCall name args
 
@@ -208,12 +200,17 @@ returnStmt :: VParser Stmt
 returnStmt = fmap ReturnStmt $ string "return" >> whitespace >> expr
 
 op :: VParser BinOp
-op = oneOf ".+-*/" >>= \o -> return $ case o of
-  '+' -> Add
-  '-' -> Sub
-  '*' -> Mul
-  '/' -> Div
-  '.' -> Dot
+op  = foldr1 (-|-)
+    $ map (\(s, v) -> string s >> return v )
+    $ [ 
+      ("+", Add), 
+      ("-", Sub), 
+      ("*", Mul), 
+      ("/", Div), 
+      (".", Dot), 
+      ("==", WeakEq),
+      ("===", StrongEq)
+    ]
 
 expr :: VParser Expr
 expr = mergeContext $ do
@@ -241,3 +238,36 @@ expr = mergeContext $ do
       whitespace0
       char ')'
       return e
+
+
+ctrlStruct :: VParser CtrlStruct
+ctrlStruct  =   functionDef
+            -|- ifStruct
+
+functionDef :: VParser CtrlStruct
+functionDef = do
+  string "function"
+  whitespace
+  name <- identifier
+  char '('
+  argNames <- sepByV identifier (whitespace0 >> string "," >> whitespace0)
+  char ')'
+  whitespace0
+  char '{'
+  whitespace0
+  content <- block
+  char '}'
+  return $ FunctionDef name argNames content
+
+ifStruct :: VParser CtrlStruct
+ifStruct = do
+  string "if"
+  whitespace0
+  char '('
+  e <- wpad expr
+  char ')'
+  whitespace0
+  char '{'
+  b <- wpad block
+  char '}'
+  return $ IfStruct e b
