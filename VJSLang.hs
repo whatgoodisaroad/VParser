@@ -71,6 +71,12 @@ data BinOp
   | Dot
   | WeakEq
   | StrongEq
+  | WeakNotEq
+  | StrongNotEq
+  | LessThan
+  | LessThanEq
+  | GreaterThan
+  | GreaterThanEq
   deriving (Show, Eq)
 
 data CtrlStruct
@@ -209,7 +215,13 @@ op  = foldr1 (-|-)
       ("/", Div), 
       (".", Dot), 
       ("==", WeakEq),
-      ("===", StrongEq)
+      ("===", StrongEq),
+      ("!=", WeakNotEq),
+      ("!==", StrongNotEq),
+      ("<", LessThan),
+      ("<=", LessThanEq),
+      (">", GreaterThan),
+      (">=", GreaterThanEq)
     ]
 
 expr :: VParser Expr
@@ -242,7 +254,11 @@ expr = mergeContext $ do
 
 ctrlStruct :: VParser CtrlStruct
 ctrlStruct  =   functionDef
+            -|- ifElseStruct
             -|- ifStruct
+            -|- doWhileStruct
+            -|- whileStruct
+            -|- forStruct
 
 functionDef :: VParser CtrlStruct
 functionDef = do
@@ -259,6 +275,26 @@ functionDef = do
   char '}'
   return $ FunctionDef name argNames content
 
+structBody :: VParser Block
+structBody = do
+  let blockBody = do { char '{'; b <- wpad block; char '}'; return b; }
+  let stmtBody = stmt >>= return . return . Left
+  let ctrlBody = ctrlStruct >>= return . return . Right
+  blockBody -|- stmtBody -|- ctrlBody
+
+ifElseStruct :: VParser CtrlStruct
+ifElseStruct = do
+  string "if"
+  whitespace0
+  char '('
+  e <- wpad expr
+  char ')'
+  whitespace0
+  b1 <- structBody
+  wpad $ string "else"
+  b2 <- structBody
+  return $ IfElseStruct e b1 b2
+
 ifStruct :: VParser CtrlStruct
 ifStruct = do
   string "if"
@@ -267,7 +303,46 @@ ifStruct = do
   e <- wpad expr
   char ')'
   whitespace0
-  char '{'
-  b <- wpad block
-  char '}'
+  b <- structBody
   return $ IfStruct e b
+
+whileStruct :: VParser CtrlStruct
+whileStruct = do
+  string "while"
+  whitespace0
+  char '('
+  e <- expr
+  char ')'
+  whitespace0
+  b <- structBody
+  return $ WhileStruct e b
+
+doWhileStruct :: VParser CtrlStruct
+doWhileStruct = do
+  string "do"
+  whitespace0
+  b <- structBody
+  whitespace0
+  string "while"
+  whitespace0
+  char '('
+  e <- expr
+  string ");"
+  return $ DoWhileStruct e b
+
+forStruct :: VParser CtrlStruct
+forStruct = do
+  string "for"
+  whitespace0
+  char '('
+  c1 <- varInit
+  char ';'
+  whitespace0
+  c2 <- expr
+  char ';'
+  whitespace0
+  c3 <- varAssign
+  char ')'
+  whitespace0
+  b <- structBody
+  return $ ForStruct c1 c2 c3 b
