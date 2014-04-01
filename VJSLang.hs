@@ -14,11 +14,24 @@ type Reference
 type Arguments 
   = VList Identifier
 
+data Var
+  = VarDef Identifier
+  | VarInit Identifier Expr
+  | VarChc Dim Var Var
+  deriving (Show, Eq)
+
+instance Variational Var where
+  mkChoice = VarChc
+  select1 s (VarChc d l r) = case (d == dimOf s, s) of
+    (False, _) -> mkChoice d (select1 s l) (select1 s r)
+    (_, SL _) -> select1 s l
+    (_, SR _) -> select1 s r
+  select1 _ v = v
+
 data Stmt
   = ExprStmt Expr
-  | VarDefStmt Identifier
-  | VarInitStmt Identifier Expr
   | VarAssignStmt Reference Expr
+  | VarStmt (VList Var)
   | ReturnStmt Expr
   | StmtC Dim Stmt Stmt
   deriving (Show, Eq)
@@ -36,6 +49,7 @@ data Lit
   | StringLit String
   | ObjectLit (VList (String, Expr))
   | InlineFunction Arguments Block
+  | ArrayLit (VList Expr)
   | LitC Dim Lit Lit
   deriving (Show, Eq)
 
@@ -77,6 +91,8 @@ data BinOp
   | LessThanEq
   | GreaterThan
   | GreaterThanEq
+  | LogicalOr
+  | LogicalAnd
   deriving (Show, Eq)
 
 data CtrlStruct
@@ -124,6 +140,13 @@ objectKeyValuePair = do
   val <- expr
   return (name, val)
 
+arrayLit ::VParser Lit
+arrayLit = do
+  char '['
+  es <- wpad $ expr `sepByV` (wpad $ char ',')
+  char ']'
+  return $ ArrayLit es
+
 inlineFunction :: VParser Lit
 inlineFunction = do
   string "function"
@@ -140,24 +163,24 @@ inlineFunction = do
 literal :: VParser Lit
 literal =     inlineFunction 
         -||-  objectLiteral 
+        -||-  arrayLit
         -||-  stringLiteral 
         -||-  numberLiteral
 
-varDef :: VParser Stmt
-varDef = do
-  string "var"
-  whitespace
-  name <- identifier
-  return $ VarDefStmt name
 
-varInit :: VParser Stmt
-varInit = do
+multiVarDef :: VParser Stmt
+multiVarDef = do
   string "var"
   whitespace
-  name <- identifier
-  wpad $ char '='
-  val <- expr
-  return $ VarInitStmt name val
+  let vinit = do {
+    n <- identifier;
+    wpad $ char '=';
+    v <- expr;
+    return $ VarInit n v;
+  }
+  let vdef = identifier >>= return . VarDef
+  vs <- (vinit -||- vdef) `sepByV` (wpad $ char ',')
+  return $ VarStmt vs
 
 varAssign :: VParser Stmt
 varAssign = do
@@ -169,8 +192,7 @@ varAssign = do
 stmt :: VParser Stmt
 stmt  = do
   s <-    returnStmt
-    -||-  varInit
-    -||-  varDef
+    -||-  multiVarDef
     -||-  varAssign
     -||-  (fmap ExprStmt expr)
   char ';'
@@ -214,14 +236,16 @@ op  = foldr1 (-|-)
       ("*", Mul), 
       ("/", Div), 
       (".", Dot), 
-      ("==", WeakEq),
       ("===", StrongEq),
-      ("!=", WeakNotEq),
+      ("==", WeakEq),
       ("!==", StrongNotEq),
-      ("<", LessThan),
+      ("!=", WeakNotEq),
       ("<=", LessThanEq),
+      ("<", LessThan),
+      (">=", GreaterThanEq),
       (">", GreaterThan),
-      (">=", GreaterThanEq)
+      ("||", LogicalOr),
+      ("&&", LogicalAnd)
     ]
 
 expr :: VParser Expr
@@ -335,7 +359,7 @@ forStruct = do
   string "for"
   whitespace0
   char '('
-  c1 <- varInit
+  c1 <- multiVarDef
   char ';'
   whitespace0
   c2 <- expr
