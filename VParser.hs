@@ -138,13 +138,9 @@ advance ::
   forall a.
   Eq a => 
   VParser a -> VList (VList a, VString) -> VList (VList a, VString)
-advance p = normalizeContext . VL . concatMap g . segments
+advance p = normalizeContext . applyToLeastAdvanced (VL . advanceContext)
   where
     f = getFn p
-
-    g :: Segment (VList a, VString) -> VList' (VList a, VString)
-    g (Elems cs) = normalize' $ concatMap advanceContext cs
-    g (SegChoice d l r) = [SegChoice d (advance p l) (advance p r)]
 
     --  Given a single parser context, apply the parser to move it forward, but
     --  if it fails, do nothing to the context.
@@ -164,6 +160,24 @@ advance p = normalizeContext . VL . concatMap g . segments
 
         --  Successful advance --> append to vlist
         append (Just (a, s'')) = (normalize vl +++ single a, s'')
+
+applyToLeastAdvanced :: 
+  ((a, VString) -> VList (a, VString)) -> 
+  VList (a, VString) -> 
+  VList (a, VString)
+applyToLeastAdvanced f l = concatMapWhere f isLeastAdvanced l
+  where
+    pos = maximum $ allValues $ fmap (len . snd) l
+
+    --  Hacky advancement metric. Based on the average of possible variant 
+    --  lengths.
+    len :: VString -> Float
+    len = avg . allValues . asSingleton . fmap fromIntegral . lengthVL
+      where
+        avg xs = sum xs / fromIntegral (length xs)
+
+    isLeastAdvanced :: (a, VString) -> Bool
+    isLeastAdvanced (_, s) = len s == pos
 
 merge :: (Variational a, Eq a) => VList (a, VString) -> VList (a, VString)
 merge = mergeBy mkChoice

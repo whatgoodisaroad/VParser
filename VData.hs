@@ -280,3 +280,5 @@ sharePrefixVL v1 v2 = let
 
     _ -> (VL prefix, VL suff1, VL suff2)
 
+concatMapWhere :: (a -> VList a) -> (a -> Bool) -> VList a -> VList a
+concatMapWhere f t = concatMapVL $ \e -> if t e then f e else return e
