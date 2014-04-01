@@ -2,8 +2,14 @@ import VData
 import VParser
 import VStringReader
 
+data Code
+  = Stmt Stmt
+  | CtrlStruct CtrlStruct
+  | Comment Comment
+  deriving (Show, Eq)
+
 type Block
-  = VList (Either Stmt CtrlStruct)
+  = VList Code
 
 type Identifier 
   = String
@@ -43,6 +49,11 @@ instance Variational Stmt where
     (_, SL _) -> select1 s l
     (_, SR _) -> select1 s r
   select1 _ stmt = stmt
+
+data Comment 
+  = InlineComment VString
+  | MultiLineComment VString
+  deriving (Show, Eq)
 
 data Lit
   = NumLit String
@@ -211,7 +222,9 @@ reference = identifier `sepBy1V` (char '.')
 
 block :: VParser Block
 block = mergeContext $ manyV $ do
-  s <- (stmt >>= return . Left) -|- (ctrlStruct >>= return . Right)
+  s <-  (stmt >>= return . Stmt) 
+    -|- (ctrlStruct >>= return . CtrlStruct)
+    -|- (comment >>= return . Comment)
   whitespace0
   return s
 
@@ -302,8 +315,8 @@ functionDef = do
 structBody :: VParser Block
 structBody = do
   let blockBody = do { char '{'; b <- wpad block; char '}'; return b; }
-  let stmtBody = stmt >>= return . return . Left
-  let ctrlBody = ctrlStruct >>= return . return . Right
+  let stmtBody = stmt >>= return . return . Stmt
+  let ctrlBody = ctrlStruct >>= return . return . CtrlStruct
   blockBody -|- stmtBody -|- ctrlBody
 
 ifElseStruct :: VParser CtrlStruct
@@ -370,3 +383,13 @@ forStruct = do
   whitespace0
   b <- structBody
   return $ ForStruct c1 c2 c3 b
+
+inlineComment :: VParser Comment
+inlineComment = do
+  string "//"
+  t <- manyV $ sat (/= '\n')
+  char '\n'
+  return $ InlineComment t
+
+comment :: VParser Comment
+comment = inlineComment
