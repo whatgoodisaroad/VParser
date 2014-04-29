@@ -206,6 +206,7 @@ stmt  = do
     -||-  multiVarDef
     -||-  varAssign
     -||-  (fmap ExprStmt expr)
+  whitespace0
   char ';'
   return s
 

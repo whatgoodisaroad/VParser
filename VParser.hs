@@ -47,17 +47,7 @@ bind :: forall a b. VParser a -> (a -> VParser b) -> VParser b
 bind p g = P $ normalize . normalizeContext . f'
   where
     f = getFn p
-
-    f' s = gs
-      where
-        fs :: VList (a, VString)
-        fs = f s
-
-        gss :: VList (VList (b, VString))
-        gss = mapVL (\(a, s') -> let (P h) = g a in h s') fs
-
-        gs :: VList (b, VString)
-        gs = normalize $ concatVL gss
+    f' = concatMapVL (\(a, s') -> let (P h) = g a in h s') . f 
 
 instance Monad VParser where
   return = inject
@@ -107,7 +97,7 @@ first :: VParser a -> VParser a
 first p = let 
     f = getFn p 
   in 
-    P $ \s -> concatVL $ asSingleton $ mapV g $ headV $ f s
+    P $ \s -> concatMapVL g $ asSingleton $ headVL $ f s
   where
     g (Just h) = single h
     g Nothing = nilV
@@ -266,22 +256,6 @@ comprehensive (VL segs) = VL $ flip map segs $ \case
   Elems []        -> Elems [Nothing]
   Elems xs        -> Elems $ map Just xs
   SegChoice d l r -> SegChoice d (comprehensive l) (comprehensive r)
-
---  Manifest splits a vlist into elements which are certain (i.e. are at the 
---  top-level, are not children of a choice) and those which are uncertain (i.e. 
---  are the children of at least one choice).
---
---  This is useful when we want to merge elements.
-manifest :: VList a -> ([a], VList a)
-manifest (VL []) =  ([], nilV)
-manifest (VL ((Elems ys):xs)) = let 
-    (c, u) = manifest $ VL xs 
-  in
-  (ys ++ c, u)
-manifest (VL (x@(SegChoice _ _ _):xs)) = let
-    (c, u) = manifest $ VL xs
-  in 
-  (c, (VL [x]) +++ u)
 
 oneOf :: [Char] -> VParser Char
 oneOf = sat . flip elem

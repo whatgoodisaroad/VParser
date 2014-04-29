@@ -18,8 +18,8 @@ dimOf :: Select -> Dim
 dimOf = \case { SL d -> d; SR d -> d }
 
 class Variational a where
-  select1 :: Select -> a -> a
-  mkChoice  ::         Dim -> a -> a -> a
+  select1   :: Select -> a -> a
+  mkChoice  :: Dim -> a -> a -> a
 
 select :: Variational v => Selection -> v -> v
 select = flip $ foldr select1
@@ -215,8 +215,11 @@ unconsVL (VL ((SegChoice d l r):xs)) = Choice d l' r'
 consVL :: a -> VList a -> VList a
 consVL x (VL xs) = VL $ normalize' $ (Elems [x]) : xs
 
-headV :: VList a -> V (Maybe a)
-headV = mapV fst . unconsVL
+headVL :: VList a -> V (Maybe a)
+headVL = mapV fst . unconsVL
+
+tailVL :: VList a -> V (VList a)
+tailVL = mapV snd . unconsVL
 
 --  Take a variational value, and represent it as a variational list of length 1 
 --  under any selection.
@@ -240,6 +243,15 @@ foldr1VL f vs = transfer $ do
       case ult of
         (Nothing, _)  -> return x
         (Just y, vs'') -> return $ f x $ foldr1VL f $ y `consVL` vs''
+
+foldlVL :: Variational b => (b -> a -> b) -> b -> VList a -> b
+foldlVL f z0 xs0 = g z0 xs0
+   where
+      g z v = h $ unconsVL v
+        where
+          h (Val (Nothing, _)) = z
+          h (Val (Just x, xs)) = g (f z x) xs
+          h (Choice d l r) = mkChoice d (h l) (h r)
 
 dropVL :: VList a -> V [a]
 dropVL = foldrVL (\a b -> fmap (a :) b) (return [])
@@ -282,3 +294,19 @@ sharePrefixVL v1 v2 = let
 
 concatMapWhere :: (a -> VList a) -> (a -> Bool) -> VList a -> VList a
 concatMapWhere f t = concatMapVL $ \e -> if t e then f e else return e
+
+--  Manifest splits a vlist into elements which are certain (i.e. are at the 
+--  top-level, are not children of a choice) and those which are uncertain (i.e. 
+--  are the children of at least one choice).
+--
+--  This is useful when we want to merge elements.
+manifest :: VList a -> ([a], VList a)
+manifest (VL []) =  ([], nilV)
+manifest (VL ((Elems ys):xs)) = let 
+    (c, u) = manifest $ VL xs 
+  in
+  (ys ++ c, u)
+manifest (VL (x@(SegChoice _ _ _):xs)) = let
+    (c, u) = manifest $ VL xs
+  in 
+  (c, (VL [x]) +++ u)
