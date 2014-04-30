@@ -253,6 +253,11 @@ foldlVL f z0 xs0 = g z0 xs0
           h (Val (Just x, xs)) = g (f z x) xs
           h (Choice d l r) = mkChoice d (h l) (h r)
 
+foldl1VL :: Variational v => (v -> v -> v) -> VList v -> v
+foldl1VL f vl = transfer $ flip fmap (unconsVL vl) $ \case
+  (Just x, xs) -> foldlVL f x xs
+  (Nothing, _) -> error "foldl1VL passed empty list"
+
 dropVL :: VList a -> V [a]
 dropVL = foldrVL (\a b -> fmap (a :) b) (return [])
 
@@ -310,3 +315,19 @@ manifest (VL (x@(SegChoice _ _ _):xs)) = let
     (c, u) = manifest $ VL xs
   in 
   (c, (VL [x]) +++ u)
+
+--  This function ensures that every branch of a list contains at least one 
+--  value (i.e. if a branch were empty, it would have nothing, whereas every 
+--  other value is wrapped in Just. In this way, one can map across a VList 
+--  while doing something special with empty branches (and ignoring the Just's).
+--
+--  Consider, for example, when a parser is applied to variational text, and 
+--  succeeds in one branch, but fails in another. If this parser is used to 
+--  create a variational list, the failure condition signifies the end of the 
+--  list (under that selection) and not a failure to parse an entire list.
+comprehensive :: VList a -> VList (Maybe a)
+comprehensive (VL []) = single Nothing
+comprehensive (VL segs) = VL $ flip map segs $ \case
+  Elems []        -> Elems [Nothing]
+  Elems xs        -> Elems $ map Just xs
+  SegChoice d l r -> SegChoice d (comprehensive l) (comprehensive r)
