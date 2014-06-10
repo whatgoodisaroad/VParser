@@ -5,7 +5,8 @@
 
 module VData where
 
-import Data.List (intersperse, nub)
+import Data.List (intersperse, nub, sort, sortBy)
+import Data.Function (on)
 import Data.Monoid
 
 --  Values and lists:
@@ -24,6 +25,8 @@ class Variational a where
 select :: Variational v => Selection -> v -> v
 select = flip $ foldr select1
 
+select1' :: Variational a => Select -> VList a -> VList a
+select1' s = fmap (select1 s) . select1 s
 
 type Dim = Char
 
@@ -75,7 +78,7 @@ instance Show a => Show (VList a) where
 
       f :: Segment a -> [String]
       f (Elems as) = map show as
-      f (SegChoice d l r) = [ d : concat [ "<", show l, " | ", show r, ">" ]]
+      f (SegChoice d l r) = [ d : concat [ "<", show l, " , ", show r, ">" ]]
 
 instance Monoid (VList a) where
   mappend l r = case (normalize l, normalize r) of
@@ -101,7 +104,7 @@ instance Monad VList where
   (>>=) = flip concatMapVL
 
 select1VL :: Select -> VList a -> VList a
-select1VL s = VL . concatMap f . segments
+select1VL s = VL . normalize' . concatMap f . segments
   where
     d = dimOf s
 
@@ -160,7 +163,8 @@ normalize' ((SegChoice d1 l1 r1):(SegChoice d2 l2 r2):z) = if d1 == d2
 --  Recurse down choices and remove empty ones
 normalize' ((SegChoice d l r):z) = 
   let 
-    (l', r') = (normalize l, normalize r) 
+    l' = select1 (SL d) $ normalize l 
+    r' = select1 (SR d) $ normalize r
   in
   if (null $ segments l') && (null $ segments r')
     then normalize' z
@@ -203,11 +207,11 @@ concatMapVL f = concatVL . mapVL f
 --  empty under some selection, so the head of the list must be in a Maybe.
 unconsVL :: VList a -> V (Maybe a, VList a)
 unconsVL (VL []) = Val (Nothing, nilV)
-unconsVL (VL ((Elems []):xs)) = unconsVL $ VL xs
-unconsVL (VL ((Elems (a:[])):xs)) = Val (Just a, VL xs)
-unconsVL (VL ((Elems (a:as)):xs)) = 
+unconsVL (VL (Elems [] : xs)) = unconsVL $ VL xs
+unconsVL (VL (Elems (a:[]) : xs)) = Val (Just a, VL xs)
+unconsVL (VL (Elems (a:as) : xs)) = 
   Val (Just a, VL $ normalize' $ (Elems as):xs)
-unconsVL (VL ((SegChoice d l r):xs)) = Choice d l' r'
+unconsVL (VL (SegChoice d l r : xs)) = Choice d l' r'
   where
     l' = unconsVL $ l +++ (VL xs)
     r' = unconsVL $ r +++ (VL xs)
@@ -316,6 +320,16 @@ manifest (VL (x@(SegChoice _ _ _):xs)) = let
   in 
   (c, (VL [x]) +++ u)
 
+--  A version of normalize for lists where the order is not significant. It can
+--  combine top-level choice segments of the same dimension which may not have 
+--  adjacent in the original list.
+order :: VList a -> VList a
+order v = liftV c +++ u'
+  where 
+    (c, u) = manifest v
+    d (SegChoice d _ _) = d
+    u' = VL $ sortBy (compare `on` d) $ segments u
+
 --  This function ensures that every branch of a list contains at least one 
 --  value (i.e. if a branch were empty, it would have nothing, whereas every 
 --  other value is wrapped in Just. In this way, one can map across a VList 
@@ -331,3 +345,15 @@ comprehensive (VL segs) = VL $ flip map segs $ \case
   Elems []        -> Elems [Nothing]
   Elems xs        -> Elems $ map Just xs
   SegChoice d l r -> SegChoice d (comprehensive l) (comprehensive r)
+
+--  A version of VList selection that only works on the first segment of the 
+--  list.
+selectHead :: Select -> VList a -> VList a
+selectHead _ (VL []) = nilV
+selectHead s (VL (g:gs)) = f g +++ VL gs
+  where
+    f g@(Elems _) = VL [g]
+    f (SegChoice d' l r) = case (d' == dimOf s, s) of
+      (False, _) -> VL [ SegChoice d' (selectHead s l) (selectHead s r) ] 
+      (_, SL _) -> selectHead s l
+      (_, SR _) -> selectHead s r

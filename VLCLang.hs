@@ -27,18 +27,19 @@ instance Variational VLC where
     (False, _) -> EChc d (select1 s l) (select1 s r)
     (_, SL _) -> select1 s l
     (_, SR _) -> select1 s r
-  select1 s (Abs c e) = Abs c $ select1 s e
+  select1 s (Abs c e) = Abs (select1 s c) (select1 s e)
+  select1 s (App e1 e2) = App (select1 s e1) (select1 s e2)
   select1 _ v = v
 
 instance Show Name where
   show (Name c) = [c]
-  show (NChc d l r) = concat [ [d], "<", show l, ",", show r, ">" ]
+  show (NChc d l r) = concat [ [d], "<", show l, " , ", show r, ">" ]
 
 instance Show VLC where
   show (Var c) = [c]
-  show (App e1 e2) = concat [ show e1, show e2 ]
+  show (App e1 e2) = concat [ "(", show e1, show e2, ")" ]
   show (Abs x e) = concat [ "(λ", show x, ".", show e, ")" ]
-  show (EChc d l r) = concat [ [d], "<", show l, ",", show r, ">" ]
+  show (EChc d l r) = concat [ [d], "<", show l, " , ", show r, ">" ]
 
 namep = mergeResult $ fmap Name $ oneOf ['a'..'z']
 
@@ -46,7 +47,7 @@ vlcp = expp
 
 expp = mergeResult $ do 
   exps <- manyV $ parenp -||- absp -||- valp
-  return $ foldr1VL App exps
+  return $ foldl1VL App exps
 
 parenp = mergeResult $ do
   char '('

@@ -33,11 +33,11 @@ normalizeContext :: forall a. VList (a, VString) -> VList (a, VString)
 normalizeContext = VL . map f . segments
   where
     f :: Segment (a, VString) -> Segment (a, VString)
-    f (SegChoice d l r) = SegChoice d (select1Snd (SL d) l) (select1Snd (SR d) r)
+    f (SegChoice d l r) = SegChoice d (selectHeadSnd (SL d) l) (selectHeadSnd (SR d) r)
     f s = s
 
-    select1Snd :: Select -> VList (a, VString) -> VList (a, VString)
-    select1Snd s = fmap (\(a, rem) -> (a, select1 s rem)) . normalizeContext
+    selectHeadSnd :: Select -> VList (a, VString) -> VList (a, VString)
+    selectHeadSnd s = fmap (\(a, rem) -> (a, selectHead s rem)) . normalizeContext
 
 --  Monadic methods: inject and bind
 inject :: a -> VParser a
@@ -47,7 +47,7 @@ bind :: forall a b. VParser a -> (a -> VParser b) -> VParser b
 bind p g = P $ normalize . normalizeContext . f'
   where
     f = getFn p
-    f' = concatMapVL (\(a, s') -> let (P h) = g a in h s') . f 
+    f' = concatMapVL (\(a, s') -> let h = getFn (g a) in h s') . f 
 
 instance Monad VParser where
   return = inject
@@ -105,8 +105,8 @@ first p = let
 (-|-) :: VParser a -> VParser a -> VParser a
 p -|- q = first $ p `alt` q
 
-(-||-) :: Variational a => VParser a -> VParser a -> VParser a
-p -||- q = first $ mergeContext $ p `alt` q
+(-||-) :: (Variational a, Eq a) => VParser a -> VParser a -> VParser a
+p -||- q = first $ mergeResult $ p `alt` q
 
 manyL1 :: VParser a -> VParser [a]
 manyL1 p = do
@@ -241,18 +241,17 @@ applyUntilStable f a = let a' = f a in if a' == a
   then a 
   else applyUntilStable f a'
 
-
 oneOf :: [Char] -> VParser Char
 oneOf = sat . flip elem
 
 sepBy1V :: Eq a => VParser a -> VParser b -> VParser (VList a)
-sepBy1V p s = do
+sepBy1V p s = mergeResult $ do
   a <- p
   as <- manyV $ s >> p
   return $ a `consVL` as
 
 sepByV :: Eq a => VParser a -> VParser b -> VParser (VList a)
-sepByV p s = sepBy1V p s -|- return nilV
+sepByV p s = sepBy1V p s -||- return nilV
 
 mergeContext :: VParser a -> VParser a
 mergeContext (PV f) = PV $ merge . f
